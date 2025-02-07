@@ -6,7 +6,8 @@
   "rules": {
     "no-useless-constructor": "off",
     "no-new": "off",
-    "@typescript-eslint/no-empty-interface": "off"
+    "@typescript-eslint/no-empty-interface": "off",
+    "camelcase": "off"
   },
   "env": {
     "vitest-globals/env": true
