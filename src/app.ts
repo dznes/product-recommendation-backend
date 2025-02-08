@@ -5,6 +5,7 @@ import fastifyCors from '@fastify/cors'
 import { ZodError } from 'zod'
 import { env } from './env'
 import { AppRoutes } from './http/controllers/routes'
+import { EmbeddingRoutes } from './http/controllers/embeddings/routes'
 
 // import { ProductionOrderRoutes } from './http/controllers/production-orders/routes'
 
@@ -32,6 +33,7 @@ app.register(fastifyJwt, {
 app.register(fastifyCookie)
 
 app.register(AppRoutes)
+app.register(EmbeddingRoutes)
 
 
 // Ao adicionar o "_" na frente do parâmetro que não vai ser utilizado ou apenas o "_" no lugar do parâmetro, você informa que ele não vai ser utilizado.
