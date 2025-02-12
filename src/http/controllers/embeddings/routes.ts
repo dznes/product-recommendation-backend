@@ -1,6 +1,8 @@
 import { FastifyInstance } from 'fastify'
-import { createEmbedding } from './create-embedding'
+import { upsertProductsEmbedding } from './upsert-products-embedding'
+import { productRecommendation } from './product-recommendation'
 
 export async function EmbeddingRoutes(app: FastifyInstance) {
-  app.get('/embeddings', createEmbedding)
+  app.post('/embeddings', upsertProductsEmbedding)
+  app.post('/embeddings/product-recommendation', productRecommendation)
 }

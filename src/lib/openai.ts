@@ -1,5 +1,6 @@
 import dotenv from "dotenv";
 import OpenAI from "openai";
+import { Product } from "@/@types/database/product";
 
 dotenv.config();
 
@@ -8,7 +9,6 @@ const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 if (!OPENAI_API_KEY) {
   throw new Error("Missing API keys. Please set PINECONE_API_KEY and OPENAI_API_KEY in your .env file.");
 }
-
 
 // Initialize OpenAI client
 export const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
@@ -23,37 +23,167 @@ export async function generateTextEmbedding(text: string) {
   return response.data[0].embedding;
 }
 
-// Function to generate embeddings using OpenAI
-export async function generateProductEmbeddings(data: any) {
-  const texts = data.map(d => `${d.title}. ${d.description}. Tags: ${d.tags.join(', ')}`);
+export interface Product2 {
+  id: string;
+  title: string;
+  category: string;
+  subcategory: string;
+  description: string;
+  tags: string[];
+  color: string;
+  material: string;
+  sizes: string[];
+  image_urls: string[];
+  season: string;
+  brand: string;
+  price: number;
+  cost: number;
+  discount: number; // Expected to be between 0 and 1 (e.g., 0.10 for 10%)
+  stock_quantity: number;
+  integration_code: string;
+}
 
-  console.log("Generating embeddings for:", texts);
+// Function to normalize embeddings
+const normalizeEmbedding = (embedding: number[]) => {
+  const magnitude = Math.sqrt(embedding.reduce((sum, val) => sum + val * val, 0));
+  return embedding.map((val) => val / magnitude);
+};
 
-  const response = await openai.embeddings.create({
-    model: "text-embedding-ada-002", // OpenAI's best embedding model
-    input: texts,
-  });
+// Function to batch OpenAI embedding requests (reduces API calls)
+async function batchGenerateEmbeddings(inputs: string[], model = "text-embedding-3-small") {
+  try {
+    const response = await openai.embeddings.create({ model, input: inputs });
+    return response.data.map((d) => d.embedding);
+  } catch (error: any) {
+    console.error("Error generating embeddings:", error.message);
+    return inputs.map(() => new Array(1536).fill(0)); // Fallback to zero vector
+  }
+}
 
-  return response.data.map((res, i) => ({
-    id: String(data[i].id), // Convert ID to string before storing in Pinecone
-    values: res.embedding,
-    metadata: {
-      title: data[i].title,
-      slug: data[i].slug,
-      category: data[i].category,
-      subcategory: data[i].subcategory,
-      description: data[i].description,
-      tags: data[i].tags,
-      color: data[i].color,
-      material: data[i].material,
-      sizes: data[i].sizes,
-      season: data[i].season,
-      brand: data[i].brand,
-      price: data[i].price,
-      cost: data[i].cost,
-      discount: data[i].discount,
-      stock_quantity: data[i].stock_quantity,
-      integration_code: data[i].integration_code
+// // Function to generate product embeddings
+// export async function generateProductEmbeddings(products: Product2[]) {
+//   const records = [];
+
+//   for (let product of products) {
+//     try {
+//       // Step 1: Generate multiple text embeddings (title, description, tags)
+//       const textInputs = [
+//         product.title,
+//         product.description,
+//         `Tags: ${product.tags.join(", ")}`,
+//       ].filter(Boolean); // Remove empty values
+
+//       const textEmbeddings = await batchGenerateEmbeddings(textInputs);
+//       const averagedTextEmbedding = textEmbeddings[0].map((_, index) =>
+//         textEmbeddings.reduce((sum, embed) => sum + embed[index], 0) / textEmbeddings.length
+//       );
+
+//       // Step 2: Generate image embeddings (if available)
+//       let imageEmbeddings = [];
+//       for (const url of Object.values(product.image_urls)) {
+//         const imageEmbedding = await batchGenerateEmbeddings([url]);
+//         imageEmbeddings.push(imageEmbedding[0]);
+//       }
+
+//       // Average all image embeddings
+//       const averagedImageEmbedding = imageEmbeddings.length
+//         ? imageEmbeddings[0].map((_, index) =>
+//             imageEmbeddings.reduce((sum, embed) => sum + embed[index], 0) / imageEmbeddings.length
+//           )
+//         : new Array(1536).fill(0); // Fallback if no images
+
+//       // Step 3: Weighted combination of text and image embeddings
+//       const imageWeight = product.category.match(/fashion|home decor|art/i) ? 0.6 : 0.3; // Higher weight for visual products
+//       const textWeight = 1 - imageWeight;
+
+//       const combinedEmbedding = averagedTextEmbedding.map((val, index) =>
+//         textWeight * val + imageWeight * averagedImageEmbedding[index]
+//       );
+
+//       // Step 4: Normalize embedding for consistency
+//       const normalizedEmbedding = normalizeEmbedding(combinedEmbedding);
+
+//       // Step 5: Prepare metadata and vector for Pinecone
+//       records.push({
+//         id: String(product.id),
+//         values: normalizedEmbedding,
+//         metadata: {
+//           title: product.title,
+//           category: product.category,
+//           description: product.description,
+//           tags: product.tags,
+//           color: product.color,
+//           sizes: product.sizes,
+//           material: product.material,
+//           brand: product.brand,
+//           price: product.price,
+//           image_urls: product.image_urls,
+//         },
+//       });
+//     } catch (error: any) {
+//       console.error(`Error generating embeddings for product ${product.id}:`, error.message);
+//     }
+//   }
+
+//   return records;
+// }
+
+// Function to generate product embeddings (image-based only)
+export async function generateProductEmbeddings(products: Product[]) {
+  const records = [];
+
+  for (let product of products) {
+    try {
+      // Collect unique image file keys from all SKUs
+      const productImages = Array.from(
+        new Set(product.skus.flatMap(sku => sku.product_images?.map(img => img.file_key) || []))
+      );
+
+      if (productImages.length === 0) {
+        console.warn(`Skipping product ${product.id} - No images found`);
+        continue; // Skip products without images
+      }
+
+      // Generate image embeddings
+      let imageEmbeddings = [];
+      for (const url of productImages) {
+        const imageEmbedding = await batchGenerateEmbeddings([url]);
+        imageEmbeddings.push(imageEmbedding[0]);
+      }
+
+      // Average all image embeddings
+      const averagedImageEmbedding = imageEmbeddings.length
+        ? imageEmbeddings[0].map((_, index) =>
+            imageEmbeddings.reduce((sum, embed) => sum + embed[index], 0) / imageEmbeddings.length
+          )
+        : new Array(1536).fill(0); // Fallback if no images
+
+      // Normalize embedding for consistency
+      const normalizedEmbedding = normalizeEmbedding(averagedImageEmbedding);
+
+      // Prepare metadata for Pinecone
+      records.push({
+        id: String(product.id),
+        values: normalizedEmbedding,
+        metadata: {
+          title: product.title,
+          slug: product.slug,
+          category: product.categories?.map(c => c.title).join(", ") || "Uncategorized",
+          colors: product.colors?.map(c => c.title).join(", ") || "Multiple",
+          sizes: product.sizes?.map(s => s.title).join(", ") || "Various",
+          reference_name: product.reference_name ?? "",
+          mpn: product.mpn ?? "",
+          integration_code: product.integration_code ?? '',
+          price_wholesale: product.price_wholesale ?? '',
+          price_retail: product.price_retail ?? '',
+          cost: product.cost ?? '',
+          image_urls: productImages, // Now only unique image file keys
+        },
+      });
+    } catch (error: any) {
+      console.error(`Error generating embeddings for product ${product.id}:`, error.message);
     }
-  }));
+  }
+
+  return records;
 }
