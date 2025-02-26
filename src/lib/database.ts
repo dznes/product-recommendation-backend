@@ -47,7 +47,7 @@ export async function getProduct(slug: string): Promise<ProductProps> {
 export async function getProducts(): Promise<Product[]> {
   try {
     const { products } = await fetch(
-      `${externalDatabaseUrl}/products/search-with-image-and-stock?q=&page=1&perPage=20`).then((res) => res.json())
+      `${externalDatabaseUrl}/products/search-with-image-and-stock?q=&page=1&perPage=50`).then((res) => res.json())
 
     return products
   } catch (error) {

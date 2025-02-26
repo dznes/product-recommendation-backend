@@ -1,5 +1,14 @@
 import dotenv from "dotenv";
 import OpenAI from "openai";
+
+import { Assistant } from "openai/resources/beta/assistants";
+import { Run } from "openai/resources/beta/threads/runs/runs";
+import { Thread } from "openai/resources/beta/threads/threads";
+import { tools } from './tools';
+
+
+import { prompt } from "./tools/prompt";
+
 import { Product } from "@/@types/database/product";
 
 dotenv.config();
@@ -172,12 +181,9 @@ export async function generateProductEmbeddings(products: Product[]) {
           colors: product.colors?.map(c => c.title).join(", ") || "Multiple",
           sizes: product.sizes?.map(s => s.title).join(", ") || "Various",
           reference_name: product.reference_name ?? "",
-          mpn: product.mpn ?? "",
-          integration_code: product.integration_code ?? '',
           price_wholesale: product.price_wholesale ?? '',
           price_retail: product.price_retail ?? '',
           cost: product.cost ?? '',
-          image_urls: productImages, // Now only unique image file keys
         },
       });
     } catch (error: any) {
@@ -186,4 +192,56 @@ export async function generateProductEmbeddings(products: Product[]) {
   }
 
   return records;
+}
+
+// Create OpenAI assistant
+export async function createAssistant(): Promise<Assistant> {
+  return await openai.beta.assistants.create({
+      model: "gpt-4o-mini",
+      name: "Alt",
+      instructions: prompt,
+      tools: Object.values(tools).map(tool => tool.definition)
+  });
+}
+
+
+// FUNCTIONS FOR OPENAI AGENTS
+
+// Create OpenAI run
+export async function createRun(thread: Thread, assistantId: string): Promise<Run> {
+
+  console.log(`🚀 Creating run for thread ${thread.id} with assistant ${assistantId}`);
+
+  let run = await openai.beta.threads.runs.create(thread.id, {
+      assistant_id: assistantId
+  });
+
+  // Wait for the run to complete and keep polling
+  while (run.status === 'in_progress' || run.status === 'queued') {
+      await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second
+      run = await openai.beta.threads.runs.retrieve(thread.id, run.id);
+  }
+
+  return run;
+}
+// Create OpenAI thread
+export async function createThread(message?: string): Promise<Thread> {
+  const thread = await openai.beta.threads.create();
+
+  if (message) {
+      await openai.beta.threads.messages.create(thread.id, {
+          role: "user",
+          content: message,
+      });
+  }
+
+  return thread;
+}
+
+export async function handleOpenAIFunctionCall(toolName: string, args: any) {
+  if (tools[toolName]) {
+      return await tools[toolName].handler(args);
+  } else {
+      throw new Error(`Tool ${toolName} not found.`);
+  }
 }
